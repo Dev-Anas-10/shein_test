@@ -24,12 +24,8 @@
   </div>
   {% endfor %}
   <div class="card total">
-    <div>
-    {% for c, t in totals.items() %}
-      <div>المجموع: <b>{{ t.total|money }} {{ c|cur }}</b>
-        {% if t.orig > t.total %}<del style="color:#888">{{ t.orig|money }}</del>{% endif %}</div>
-    {% endfor %}
-    </div>
+    <div>المجموع: <b>{{ total|money }} {{ currency|cur }}</b>
+      {% if total_orig > total %}<del style="color:#888">{{ total_orig|money }}</del>{% endif %}</div>
     <form method="post" action="{{ url_for('cart_clear') }}"><button class="red">تفريغ العربة</button></form>
   </div>
 {% endif %}

@@ -51,13 +51,11 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<EOF
 DATABASE_URL=postgresql://$DB_USER:$DB_PASS@127.0.0.1/$DB_NAME
 SECRET_KEY=$SECRET
-SHEIN_COUNTRY=OTHER
 EOF
   chmod 600 "$ENV_FILE"
   echo "اتنشأ $ENV_FILE"
 else
   DB_PASS="$(grep -oP "(?<=$DB_USER:)[^@]+" "$ENV_FILE")"
-  grep -q '^SHEIN_COUNTRY=' "$ENV_FILE" || echo 'SHEIN_COUNTRY=OTHER' >> "$ENV_FILE"
   echo "$ENV_FILE موجود — هنستخدمه زي ما هو"
 fi
 

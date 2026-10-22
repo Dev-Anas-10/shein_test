@@ -9,7 +9,6 @@
 shein-site/
 ├── app.py                    # تطبيق Flask
 ├── scraper.py                # الاستخراج (Playwright)
-├── debug_capture.py          # أداة تشخيص الشبكة والأسعار (يدوي)
 ├── schema.sql                # جداول الداتابيس (آمن للتكرار)
 ├── templates/                # base / auth / order / result / cart
 ├── deploy/shein-site.service # ملف خدمة systemd
@@ -49,8 +48,8 @@ git push -u origin main
 ssh ubuntu@IP-السيرفر
 sudo -i
 apt-get update && apt-get install -y git
-git clone https://github.com/USER/shein-site.git /tmp/shein-install
-bash /tmp/shein-install/install.sh https://github.com/USER/shein-site.git
+git clone https://github.com/Dev-Anas-10/shein_test.git /tmp/shein-install
+bash /tmp/shein-install/install.sh https://github.com/Dev-Anas-10/shein_test.git
 ```
 
 لو الريبو Private، حط التوكن في الرابط (في الأمرين):
@@ -128,36 +127,8 @@ python3 scraper.py 'https://onelink.shein.com/57/65uen3gcoyfb?shc=2_RNi1fSZ9Ya4'
 | التحديث رجّع النسخة القديمة | فيه خطأ في الكود الجديد — صلحه وارفعه وجرب تاني |
 | `git fetch` بيطلب باسورد | الريبو Private: استخدم رابط فيه التوكن (`git -C /opt/shein-site remote set-url origin https://TOKEN@github.com/USER/shein-site.git`) |
 
-## أسعار الموقع المصري (EGP)
-
-الأسعار بتتجاب لدولة واحدة بتتحدد من `SHEIN_COUNTRY` في `/etc/shein-site.env` (الافتراضي `OTHER` = الموقع المصري بالجنيه، زي ما ظاهر في رابط السلة المصري `local_country=OTHER`). السكريبت بيفرض `local_country` على الرابط (مباشر أو onelink)، وبيجرب الرابط بدون `/ar` الأول (شكل رابط السلة المصري) وبعدين مع `/ar`، وبيقف عند أول استجابة عملتها هي المتوقعة (جنيه). وبيقرأ العملة من استجابة SHEIN نفسها. لو رجعت عملة مختلفة عن المتوقعة بيظهر تنبيه أصفر في صفحة النتيجة.
-
-```bash
-nano /etc/shein-site.env      # غيّر SHEIN_COUNTRY (مثلا SA للسعودي)
-systemctl restart shein-site
-```
-
-أداة التشخيص (بتسجل طلبات الشبكة وبتجرب أكتر من `local_country` وتقارن الأسعار):
-
-```bash
-cd /opt/shein-site
-set -a; . /etc/shein-site.env; set +a
-python3 debug_capture.py 'LINK'            # طلبات الشبكة + الأسعار
-python3 debug_capture.py 'LINK' --matrix   # يجرب الرابط الأصلي + بدون local_country + SA + EG + OTHER
-less /tmp/shein_capture.json
-```
-
-لتشخيص الاستجابة الخام من SHEIN:
-
-```bash
-cd /opt/shein-site
-set -a; . /etc/shein-site.env; set +a
-SHEIN_DEBUG=1 python3 scraper.py 'LINK' | python3 -m json.tool | head -40
-less /tmp/shein_last_body.json
-```
-
 ## ملاحظات
 
 - نسبة الخصم بتظهر بس لما `original_price` أكبر من `sale_price`.
-- العملة بتتقرأ من استجابة SHEIN. عناصر العربة القديمة بتفضل بعملتها (مثلا SAR)، والمجموع بيتحسب لكل عملة لوحدها.
+- العملة ثابتة `SAR` في `scraper.py`؛ لو السوق اختلف لازم تتقرأ من الاستجابة.
 - الباسوردات متشفرة (hash)، لكن الموقع **بدون HTTPS وبدون CSRF**: مناسب للاستخدام الشخصي. لو هتفتحه لناس كتير ضيف دومين + HTTPS (Nginx + Let's Encrypt) وCSRF.

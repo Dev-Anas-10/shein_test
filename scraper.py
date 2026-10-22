@@ -1,4 +1,4 @@
-import html, json, os, re, sys
+import html, json, re, sys
 from urllib.parse import urlparse, parse_qs, urlencode
 import requests
 from playwright.sync_api import sync_playwright
@@ -6,15 +6,6 @@ from playwright.sync_api import sync_playwright
 UA = ("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36")
 API_MARKER = "/bff-api/order/cart/share/landing"
-
-# قيمة local_country المطلوبة للأسعار. الموقع المصري بيستخدم OTHER (من رابط السلة المصري).
-# تتغير من SHEIN_COUNTRY في /etc/shein-site.env
-TARGET_COUNTRY = (os.environ.get("SHEIN_COUNTRY") or "OTHER").strip().upper()
-COUNTRY_CURRENCY = {"OTHER": "EGP", "EG": "EGP", "SA": "SAR", "AE": "AED", "KW": "KWD",
-                    "QA": "QAR", "BH": "BHD", "OM": "OMR", "JO": "JOD"}
-SYMBOLS = {"ج.م": "EGP", "E£": "EGP", "EGP": "EGP", "LE": "EGP",
-           "ر.س": "SAR", "SAR": "SAR", "SR": "SAR",
-           "د.إ": "AED", "AED": "AED", "$": "USD", "USD": "USD"}
 HEADERS = {"User-Agent": UA}
 
 def is_shein(url):
@@ -32,51 +23,10 @@ def extract_url(text):
             return u
     raise ValueError("ما لقيتش رابط SHEIN في النص")
 
-def landing_url(group_id, shc, country=None):
-    q = urlencode({"shc": shc, "group_id": group_id,
-                   "local_country": country or TARGET_COUNTRY,
+def landing_url(group_id, shc, country="SA"):
+    q = urlencode({"shc": shc, "group_id": group_id, "local_country": country,
                    "url_from": "", "cart_share": 1})
-    return "https://m.shein.com/cart/share/landing?" + q
-
-def force_country(url, country):
-    """يغيّر local_country في رابط landing للدولة المطلوبة."""
-    p = urlparse(url)
-    q = parse_qs(p.query, keep_blank_values=True)
-    q["local_country"] = [country]
-    return p._replace(query=urlencode(q, doseq=True)).geturl()
-
-def landing_variants(url):
-    """نفس الرابط بدون /ar الأول (شكل رابط الموقع المصري)، وبعدين مع /ar."""
-    p = urlparse(url)
-    plain = re.sub(r"^/ar(?=/)", "", p.path)
-    out = []
-    for path in (plain, "/ar" + plain):
-        u = p._replace(path=path).geturl()
-        if u not in out:
-            out.append(u)
-    return out
-
-def body_products(body):
-    return ((body or {}).get("info") or {}).get("normalProducts") or []
-
-def body_currencies(body):
-    return {currency_of(x.get("salePrice") or {}) or currency_of(x.get("retailPrice") or {})
-            for x in body_products(body)}
-
-def currency_of(price):
-    """يقرأ عملة السعر من استجابة SHEIN (حقل currency أو رمز العملة)."""
-    if not isinstance(price, dict):
-        return ""
-    for k in ("currency", "currencyCode", "currency_code"):
-        v = price.get(k)
-        if isinstance(v, str) and v.strip():
-            v = v.strip()
-            return SYMBOLS.get(v, v.upper())
-    txt = re.sub(r"[\u200e\u200f\u061c\s]", "", str(price.get("amountWithSymbol") or ""))
-    for sym in sorted(SYMBOLS, key=len, reverse=True):
-        if sym in txt:
-            return SYMBOLS[sym]
-    return ""
+    return "https://m.shein.com/ar/cart/share/landing?" + q
 
 def resolve_short(short_url):
     s = requests.Session()
@@ -105,7 +55,8 @@ def resolve_short(short_url):
            or parse_qs(urlparse(appjump).query).get("shc", [""])[0])
     if not shc:
         raise ValueError("ما لقيتش shc في الرابط")
-    return landing_url(gid, shc, TARGET_COUNTRY)
+    country = str(info.get("localcountry") or "SA")
+    return landing_url(gid, shc, country)
 
 def normalize_input(url):
     if not is_shein(url):
@@ -113,7 +64,7 @@ def normalize_input(url):
     q = parse_qs(urlparse(url).query)
     gid = q.get("group_id", [""])[0]
     if gid and re.fullmatch(r"[A-Za-z0-9_-]+", gid) and "/cart/share/landing" in url:
-        return force_country(url, TARGET_COUNTRY)  # رابط مباشر
+        return url          # رابط مباشر
     return resolve_short(url)  # رابط قصير
 
 def normalize_product(p):
@@ -124,7 +75,6 @@ def normalize_product(p):
         img = "https://m.shein.com" + img
     retail = p.get("retailPrice") or {}
     sale = p.get("salePrice") or {}
-    cur = currency_of(sale) or currency_of(retail)
     return {
         "goods_id": str(p.get("goods_id") or ""),
         "goods_sn": str(p.get("goods_sn") or ""),
@@ -132,8 +82,7 @@ def normalize_product(p):
         "image": img,
         "original_price": str(retail.get("amount") or ""),
         "sale_price": str(sale.get("amount") or ""),
-        "currency": cur or COUNTRY_CURRENCY.get(TARGET_COUNTRY, ""),
-        "currency_detected": bool(cur),
+        "currency": "SAR",
         "selected_variant": p.get("goodsAttr") or "",
         "sku_code": p.get("sku_code") or "",
         "sold_out": bool(p.get("soldOutStatus", False)),
@@ -143,7 +92,7 @@ def capture(url):
     found = {}
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(locale="ar-EG", timezone_id="Africa/Cairo", user_agent=UA)
+        ctx = browser.new_context(locale="ar", user_agent=UA)
         page = ctx.new_page()
 
         def on_response(r):
@@ -168,43 +117,17 @@ def main():
     if len(sys.argv) != 2:
         sys.exit("Usage: scraper.py URL")
     try:
-        base = normalize_input(extract_url(sys.argv[1]))
-        expected = COUNTRY_CURRENCY.get(TARGET_COUNTRY, "")
-        body = url = fallback = None
-        last_err = "ما اتلقطتش استجابة SHEIN (ممكن SHEIN طلبت تحقق إضافي أو الرابط منتهي)"
-        for cand in landing_variants(base):
-            b = capture(cand)
-            if not isinstance(b, dict):
-                continue
-            if str(b.get("code")) != "0":
-                last_err = f"SHEIN API error: {b.get('code')} {b.get('msg')}"
-                continue
-            if not body_products(b):
-                last_err = "مفيش منتجات في السلة دي"
-                continue
-            if not expected or body_currencies(b) == {expected}:
-                body, url = b, cand      # العملة المتوقعة (جنيه) — نوقف هنا
-                break
-            if fallback is None:
-                fallback = (b, cand)     # استجابة سليمة بعملة تانية — احتياطي
-        if body is None and fallback:
-            body, url = fallback
-        if body is None:
-            sys.exit(last_err)
+        url = normalize_input(extract_url(sys.argv[1]))
+        body = capture(url)
+        if not isinstance(body, dict):
+            sys.exit("ما اتلقطتش استجابة SHEIN (ممكن SHEIN طلبت تحقق إضافي أو الرابط منتهي)")
+        if str(body.get("code")) != "0":
+            sys.exit(f"SHEIN API error: {body.get('code')} {body.get('msg')}")
         info = body.get("info") or {}
-        raw = body_products(body)
-        if os.environ.get("SHEIN_DEBUG") == "1":
-            with open("/tmp/shein_last_body.json", "w", encoding="utf-8") as f:
-                json.dump(body, f, ensure_ascii=False, indent=2)
+        raw = info.get("normalProducts") or []
+        if not raw:
+            sys.exit("مفيش منتجات في السلة دي")
         products = [normalize_product(p) for p in raw]
-        expected = COUNTRY_CURRENCY.get(TARGET_COUNTRY, "")
-        got = {x["currency"] for x in products}
-        warning = ""
-        if not all(x["currency_detected"] for x in products):
-            warning = "ما قدرتش أتأكد من عملة الأسعار اللي رجعتها SHEIN."
-        elif expected and got != {expected}:
-            warning = ("SHEIN رجّعت الأسعار بعملة %s بدل %s — الأسعار دي مش بتاعة الموقع المطلوب."
-                       % ("/".join(sorted(got)), expected))
         out = {
             "title": info.get("title") or "العناصر التي شاركها صديقك",
             "product_count": len(products),
@@ -212,8 +135,6 @@ def main():
             "out_of_stock_count": len(info.get("outStock") or []),
             "unavailable_count": len(info.get("unavailable") or []),
             "landing_url": url,
-            "country": TARGET_COUNTRY,
-            "currency_warning": warning,
         }
         print(json.dumps(out, ensure_ascii=False))
     except SystemExit:
