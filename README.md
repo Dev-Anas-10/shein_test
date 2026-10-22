@@ -48,8 +48,8 @@ git push -u origin main
 ssh ubuntu@IP-السيرفر
 sudo -i
 apt-get update && apt-get install -y git
-git clone https://github.com/USER/shein-site.git /tmp/shein-install
-bash /tmp/shein-install/install.sh https://github.com/USER/shein-site.git
+git clone https://github.com/Dev-Anas-10/shein_test.git /tmp/shein-install
+bash /tmp/shein-install/install.sh https://github.com/Dev-Anas-10/shein_test.git
 ```
 
 لو الريبو Private، حط التوكن في الرابط (في الأمرين):
