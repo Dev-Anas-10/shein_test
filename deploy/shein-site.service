@@ -1,0 +1,12 @@
+[Unit]
+Description=SHEIN Cart Site
+After=network.target postgresql.service
+
+[Service]
+WorkingDirectory=/opt/shein-site
+EnvironmentFile=/etc/shein-site.env
+ExecStart=/usr/bin/gunicorn -w 2 -b 0.0.0.0:80 --timeout 180 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
