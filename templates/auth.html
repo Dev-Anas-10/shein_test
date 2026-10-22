@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:30px auto">
+  <h2>{{ "إنشاء حساب" if mode=="register" else "تسجيل الدخول" }}</h2>
+  <form method="post">
+    <label>الإيميل</label>
+    <input type="email" name="email" required>
+    <label>الباسورد</label>
+    <input type="password" name="password" required minlength="6">
+    <button type="submit">{{ "تسجيل" if mode=="register" else "دخول" }}</button>
+  </form>
+  <p>
+  {% if mode=="register" %}عندك حساب؟ <a href="{{ url_for('login') }}">سجل دخول</a>
+  {% else %}مفيش حساب؟ <a href="{{ url_for('register') }}">أنشئ حساب</a>{% endif %}
+  </p>
+</div>
+{% endblock %}
