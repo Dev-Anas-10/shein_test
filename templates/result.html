@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card total">
+  <div>
+    <div>{{ data.title }} — {{ data.product_count }} منتج</div>
+    <div>الإجمالي: <b>{{ total|money }} {{ currency|cur }}</b>
+      {% if total_orig > total %}<del style="color:#888">{{ total_orig|money }}</del>{% endif %}</div>
+  </div>
+  <form method="post" action="{{ url_for('cart_add') }}">
+    <input type="hidden" name="sid" value="{{ sid }}">
+    <input type="hidden" name="idx" value="all">
+    <button type="submit">أضف الكل للعربة</button>
+  </form>
+</div>
+
+<div class="grid">
+{% for i in items %}{% set p = i.p %}
+  <div class="prod">
+    <img src="{{ p.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+    <div class="b">
+      <div class="name">{{ p.name }}</div>
+      {% if p.selected_variant %}<div class="var">{{ p.selected_variant }}</div>{% endif %}
+      <div class="price">
+        <span class="now">{{ i.sale|money }} {{ p.currency|cur }}</span>
+        {% if i.pct > 0 %}<del>{{ i.orig|money }}</del><span class="badge">-{{ i.pct }}%</span>{% endif %}
+        {% if p.sold_out %}<span class="sold">نفد</span>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('cart_add') }}" style="margin-top:auto">
+        <input type="hidden" name="sid" value="{{ sid }}">
+        <input type="hidden" name="idx" value="{{ loop.index0 }}">
+        <button type="submit" {% if p.sold_out %}disabled{% endif %}>أضف للعربة</button>
+      </form>
+    </div>
+  </div>
+{% endfor %}
+</div>
+
+<div class="card">
+  <details open>
+    <summary><b>JSON المستخرج</b> — <a href="{{ url_for('result_json', sid=sid) }}" target="_blank">فتح خام</a></summary>
+    <pre>{{ raw }}</pre>
+  </details>
+</div>
+<p><a class="btn light" href="{{ url_for('order') }}">طلب جديد</a></p>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h2>طلب أوردر</h2>
+  <p>حط رابط سلة SHEIN المشتركة (الرابط المباشر أو الرابط القصير onelink).</p>
+  <form method="post" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='جاري الاستخراج... (ممكن ياخد نص دقيقة)'">
+    <input type="url" name="url" placeholder="https://onelink.shein.com/... أو https://m.shein.com/ar/cart/share/landing?..." required>
+    <button type="submit">استخراج المنتجات</button>
+  </form>
+</div>
+{% endblock %}
