@@ -58,6 +58,12 @@ if [ "$DEPS" -eq 1 ]; then
   python3 -m playwright install --with-deps chromium
 fi
 
+if grep -q '^SHEIN_COUNTRY=EG$' "$ENV_FILE"; then
+  sed -i 's/^SHEIN_COUNTRY=EG$/SHEIN_COUNTRY=OTHER/' "$ENV_FILE"
+  echo "اتغير SHEIN_COUNTRY من EG إلى OTHER (قيمة الموقع المصري)"
+fi
+grep -q '^SHEIN_COUNTRY=' "$ENV_FILE" || { echo 'SHEIN_COUNTRY=OTHER' >> "$ENV_FILE"; echo "اتضاف SHEIN_COUNTRY=OTHER لـ $ENV_FILE"; }
+
 say "3/5  ضبط الداتابيس (schema.sql آمن للتكرار)"
 DB_PASS="$(grep -oP "(?<=$DB_USER:)[^@]+" "$ENV_FILE")"
 PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" \

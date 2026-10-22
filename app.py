@@ -16,7 +16,7 @@ app.secret_key = os.environ["SECRET_KEY"]
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
 
-CUR = {"SAR": "ر.س"}
+CUR = {"SAR": "ر.س", "EGP": "ج.م"}
 
 @app.template_filter("money")
 def money(v):
@@ -72,7 +72,7 @@ def enrich(p):
     o, s = dec(p.get("original_price")), dec(p.get("sale_price"))
     if o < s or o == 0:
         o = s
-    pct = int((o - s) / o * 100) if o > s else 0
+    pct = round((o - s) / o * 100) if o > s else 0
     return {"p": p, "orig": o, "sale": s, "pct": pct}
 
 # ---------- auth ----------
@@ -195,6 +195,7 @@ def cart_add():
              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
              ON CONFLICT (user_id,goods_id,sku_code) DO UPDATE SET
                qty=cart_items.qty+1, name=EXCLUDED.name, image=EXCLUDED.image,
+               currency=EXCLUDED.currency,
                original_price=EXCLUDED.original_price, sale_price=EXCLUDED.sale_price""",
           (session["uid"], p["goods_id"], p["goods_sn"], p["name"], p["image"], o, s,
            p["currency"], p["selected_variant"], p["sku_code"]), None)
@@ -207,15 +208,15 @@ def cart_add():
 def cart():
     rows = q("SELECT * FROM cart_items WHERE user_id=%s ORDER BY added_at DESC",
              (session["uid"],))
-    total = sum((r["sale_price"] * r["qty"] for r in rows), Decimal(0))
-    total_orig = sum((max(r["original_price"], r["sale_price"]) * r["qty"] for r in rows), Decimal(0))
-    currency = rows[0]["currency"] if rows else "SAR"
+    totals = {}
     for r in rows:
-        o, s = max(r["original_price"], r["sale_price"]), r["sale_price"]
-        r["pct"] = int((o - s) / o * 100) if o > s else 0
+        o, s_ = max(r["original_price"], r["sale_price"]), r["sale_price"]
+        r["pct"] = round((o - s_) / o * 100) if o > s_ else 0
         r["orig"] = o
-    return render_template("cart.html", rows=rows, total=total,
-                           total_orig=total_orig, currency=currency)
+        t = totals.setdefault(r["currency"], {"total": Decimal(0), "orig": Decimal(0)})
+        t["total"] += s_ * r["qty"]
+        t["orig"] += o * r["qty"]
+    return render_template("cart.html", rows=rows, totals=totals)
 
 @app.post("/cart/qty/<int:item_id>")
 @login_required
