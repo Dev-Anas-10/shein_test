@@ -3,10 +3,11 @@ import html
 import json
 import re
 import sys
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode
 
 import requests
 from playwright.sync_api import sync_playwright
+
 
 UA = (
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
@@ -18,16 +19,23 @@ API_MARKER = "/bff-api/order/cart/share/landing"
 HEADERS = {"User-Agent": UA}
 
 
+def log(*args):
+    print(*args, file=sys.stderr, flush=True)
+
+
 def is_shein(url):
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    return (
-        parsed.scheme in ("http", "https")
-        and (host == "shein.com" or host.endswith(".shein.com"))
-    )
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return (
+            parsed.scheme in ("http", "https")
+            and (host == "shein.com" or host.endswith(".shein.com"))
+        )
+    except Exception:
+        return False
 
 
-URL_RE = re.compile(r"https?://[^\s<>\"']+")
+URL_RE = re.compile(r"""https?://[^\s<>"']+""")
 
 
 def extract_url(text):
@@ -35,15 +43,11 @@ def extract_url(text):
         url = match.group(0).rstrip(".,;:!?)")
         if is_shein(url):
             return url
-    raise ValueError("ما لقيتش رابط SHEIN في النص")
+
+    raise ValueError("ما لقيتش رابط SHEIN رسمي في النص")
 
 
 def landing_url(group_id, shc, market="EG"):
-    """
-    بناء رابط المشاركة حسب السوق المطلوب.
-    EG: مسار مصر من غير /ar/ مع local_country=OTHER.
-    SA: المسار العربي مع local_country=SA.
-    """
     if market == "EG":
         path = "/cart/share/landing"
         country = "OTHER"
@@ -65,30 +69,21 @@ def landing_url(group_id, shc, market="EG"):
 
 
 def share_data_from_url(url):
-    """
-    استخراج بيانات المشاركة من رابط يحتوي بالفعل على group_id وshc.
-    """
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
 
     group_id = query.get("group_id", [""])[0]
     shc = query.get("shc", [""])[0]
 
-    if group_id and shc:
-        return group_id, shc
-
-    return None, shc
+    return group_id or None, shc or None
 
 
 def resolve_short(short_url, market="EG"):
-    """
-    يتبع رابط onelink ويحاول استخراج رابط مشاركة كامل.
-    بعد استخراج group_id وshc يبني رابط السوق المطلوب.
-    """
     if not is_shein(short_url):
         raise ValueError("لازم رابط SHEIN رسمي")
 
     session = requests.Session()
+
     response = session.get(
         short_url,
         headers=HEADERS,
@@ -100,73 +95,84 @@ def resolve_short(short_url, market="EG"):
     final_url = response.url
     group_id, shc = share_data_from_url(final_url)
 
+    original_query = parse_qs(urlparse(short_url).query)
     if not shc:
-        shc = parse_qs(urlparse(short_url).query).get("shc", [""])[0]
+        shc = original_query.get("shc", [""])[0] or None
 
-    # محاولة استخراج appjump وshareInfo من صفحة الرابط القصير.
-    appjump = None
     source = html.unescape(response.text)
 
+    # محاولة استخراج رابط appjump من صفحة المشاركة.
+    appjump = None
+
     for tag in re.findall(r"<input\b[^>]*>", source, re.I):
-        if re.search(r'\bid=["\']url["\']', tag, re.I):
-            match = re.search(r'\bvalue=["\']([^"\']+)["\']', tag, re.I)
+        if re.search(r"""\bid=["']url["']""", tag, re.I):
+            match = re.search(
+                r"""\bvalue=["']([^"']+)["']""",
+                tag,
+                re.I,
+            )
             if match:
-                appjump = html.unescape(match.group(1))
-                break
+                candidate = html.unescape(match.group(1))
+                if is_shein(candidate):
+                    appjump = candidate
+                    break
 
-    if appjump and is_shein(appjump):
-        jump_response = session.get(
-            appjump,
-            headers=HEADERS,
-            timeout=30,
-            allow_redirects=True,
-        )
-        jump_response.raise_for_status()
+    if appjump:
+        try:
+            jump_response = session.get(
+                appjump,
+                headers=HEADERS,
+                timeout=30,
+                allow_redirects=True,
+            )
+            jump_response.raise_for_status()
 
-        jump_url = jump_response.url
-        jump_group, jump_shc = share_data_from_url(jump_url)
+            jump_group, jump_shc = share_data_from_url(
+                jump_response.url
+            )
 
-        if jump_group:
-            group_id = jump_group
-        if jump_shc:
-            shc = jump_shc
+            if jump_group:
+                group_id = jump_group
+            if jump_shc:
+                shc = jump_shc
 
-        jump_source = html.unescape(jump_response.text)
-        match = re.search(
-            r"\bvar\s+shareInfo\s*=\s*(\{.*?\})\s*;",
-            jump_source,
-            re.S,
-        )
+            # استخراج shareInfo إذا كانت موجودة.
+            jump_source = html.unescape(jump_response.text)
+            match = re.search(
+                r"\bvar\s+shareInfo\s*=\s*(\{.*?\})\s*;",
+                jump_source,
+                re.S,
+            )
 
-        if match:
-            try:
-                info = json.loads(match.group(1))
-                extracted_group = str(
-                    info.get("id") or info.get("shareId") or ""
-                )
-                if extracted_group.isdigit():
-                    group_id = extracted_group
-
-                if not shc:
-                    shc = (
-                        parse_qs(urlparse(short_url).query).get("shc", [""])[0]
-                        or parse_qs(urlparse(appjump).query).get("shc", [""])[0]
+            if match:
+                try:
+                    info = json.loads(match.group(1))
+                    extracted_group = str(
+                        info.get("id")
+                        or info.get("shareId")
+                        or ""
                     )
-            except json.JSONDecodeError:
-                pass
+
+                    if extracted_group.isdigit():
+                        group_id = extracted_group
+
+                except json.JSONDecodeError:
+                    pass
+
+        except requests.RequestException as error:
+            log("ملاحظة: تعذّر فتح appjump:", type(error).__name__)
 
     if not group_id or not str(group_id).isdigit():
         raise ValueError(
-            "لم أستطع استخراج group_id من onelink. "
-            "لا يمكن تخمين معرّف المجموعة المصرية."
+            "لم أستطع استخراج group_id من رابط المشاركة."
         )
 
     if not shc:
-        raise ValueError("لم أستطع استخراج shc من الرابط")
+        raise ValueError("لم أستطع استخراج shc من الرابط.")
 
-    print("Resolved group_id:", group_id, file=sys.stderr)
-    print("Resolved shc:", shc, file=sys.stderr)
-    print("Requested market:", market, file=sys.stderr)
+    log("Resolved group_id:", group_id)
+    log("Resolved shc:", shc)
+    log("Requested market:", market)
 
     return landing_url(str(group_id), shc, market=market)
 
@@ -177,20 +183,18 @@ def normalize_input(url, market="EG"):
 
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
+
     group_id = query.get("group_id", [""])[0]
     shc = query.get("shc", [""])[0]
 
-    # حتى لو الرابط مباشر، نعيد بناء مسار السوق المطلوب
-    # مع الحفاظ على group_id وshc الموجودين في الرابط.
     if (
         group_id
-        and re.fullmatch(r"[A-Za-z0-9_-]+", group_id)
+        and group_id.isdigit()
         and shc
         and "/cart/share/landing" in parsed.path
     ):
         return landing_url(group_id, shc, market=market)
 
-    # رابط onelink أو رابط قصير.
     return resolve_short(url, market=market)
 
 
@@ -206,12 +210,15 @@ def normalize_product(product):
     sale = product.get("salePrice") or {}
 
     display_price = sale.get("amountWithSymbol") or ""
-    currency = (
-        "EGP" if "EGP" in display_price
-        else "SAR" if "SAR" in display_price
-        else "USD" if "USD" in display_price or "$" in display_price
-        else ""
-    )
+
+    if "EGP" in display_price:
+        currency = "EGP"
+    elif "SAR" in display_price:
+        currency = "SAR"
+    elif "USD" in display_price or "$" in display_price:
+        currency = "USD"
+    else:
+        currency = ""
 
     return {
         "goods_id": str(product.get("goods_id") or ""),
@@ -219,7 +226,9 @@ def normalize_product(product):
         "name": product.get("goods_name") or "",
         "image": image,
         "original_price": str(retail.get("amount") or ""),
-        "original_price_display": retail.get("amountWithSymbol") or "",
+        "original_price_display": (
+            retail.get("amountWithSymbol") or ""
+        ),
         "sale_price": str(sale.get("amount") or ""),
         "sale_price_display": display_price,
         "currency": currency,
@@ -235,10 +244,12 @@ def capture(url):
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
+
         context = browser.new_context(
             locale="en",
             user_agent=UA,
         )
+
         page = context.new_page()
 
         def on_response(response):
@@ -246,13 +257,45 @@ def capture(url):
                 return
 
             try:
-                responses.append({
+                body = response.json()
+
+                if not isinstance(body, dict):
+                    return
+
+                info = body.get("info") or {}
+                products = info.get("normalProducts") or []
+
+                # نسجّل الاستجابة ونتيجة فحصها، دون تسجيل
+                # Cookies أو Headers أو Tokens.
+                entry = {
                     "api_url": response.url,
                     "status": response.status,
-                    "body": response.json(),
-                })
-            except Exception:
-                pass
+                    "method": response.request.method,
+                    "body": body,
+                    "product_count": len(products),
+                }
+
+                responses.append(entry)
+
+                log(
+                    "Captured API:",
+                    json.dumps(
+                        {
+                            "method": entry["method"],
+                            "status": entry["status"],
+                            "url": entry["api_url"],
+                            "product_count": entry["product_count"],
+                            "api_code": body.get("code"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+
+            except Exception as error:
+                log(
+                    "API capture error:",
+                    type(error).__name__,
+                )
 
         page.on("response", on_response)
 
@@ -262,12 +305,20 @@ def capture(url):
                 wait_until="domcontentloaded",
                 timeout=60000,
             )
+
+            # نستمر في مراقبة الصفحة حتى تظهر منتجات،
+            # أو تنتهي المهلة.
             for _ in range(30):
-                if responses:
+                if any(
+                    item["product_count"] > 0
+                    for item in responses
+                ):
                     break
+
                 page.wait_for_timeout(1000)
 
             final_url = page.url
+
         finally:
             browser.close()
 
@@ -276,38 +327,50 @@ def capture(url):
 
 def main():
     if len(sys.argv) != 2:
-        sys.exit("Usage: python scraper.py URL")
+        sys.exit("Usage: python3 scraper.py URL")
 
     try:
         input_url = extract_url(sys.argv[1])
-
-        # السوق الافتراضي المطلوب هو مصر.
         url = normalize_input(input_url, market="EG")
 
-        print("Requested landing URL:", url, file=sys.stderr)
+        log("Requested landing URL:", url)
 
         final_url, responses = capture(url)
 
-        print("Final page URL:", final_url, file=sys.stderr)
+        log("Final page URL:", final_url)
 
         if not responses:
             sys.exit(
-                "لم نلتقط استجابة API. قد تكون الصفحة لم تطلب البيانات "
-                "أو ظهر تحقق إضافي."
+                "لم نلتقط استجابة API الخاصة بمشاركة السلة. "
+                "راجع الرابط أو تحقق من الصفحة."
             )
 
-        result = responses[-1]
+        # نعطي الأولوية للاستجابة التي تحتوي على منتجات،
+        # بدل اختيار آخر استجابة فقط.
+        result = next(
+            (
+                item
+                for item in reversed(responses)
+                if item["product_count"] > 0
+            ),
+            responses[-1],
+        )
+
         body = result["body"]
 
-        print("API URL:", result["api_url"], file=sys.stderr)
-        print("HTTP status:", result["status"], file=sys.stderr)
+        log("API URL:", result["api_url"])
+        log("HTTP status:", result["status"])
+        log("API method:", result["method"])
+        log("Captured API responses:", len(responses))
+        log("Selected response product count:", result["product_count"])
 
         if not isinstance(body, dict):
-            sys.exit("استجابة API غير متوقعة")
+            sys.exit("استجابة API غير متوقعة.")
 
         if str(body.get("code")) != "0":
             sys.exit(
-                f"SHEIN API error: {body.get('code')} {body.get('msg')}"
+                f"SHEIN API error: "
+                f"{body.get('code')} {body.get('msg')}"
             )
 
         info = body.get("info") or {}
@@ -315,19 +378,27 @@ def main():
 
         if not raw_products:
             sys.exit(
-                "الـ API رجّع استجابة ناجحة من غير منتجات. "
-                "راجع Requested landing URL وFinal page URL وAPI URL. "
-                "إجبار مسار مصر لا يحوّل group_id سعوديًا إلى مجموعة مصرية."
+                "كل استجابات API الملتقطة كانت من غير منتجات. "
+                "راجع Final page URL وAPI URL وCaptured API. "
+                "الكود لا يستطيع إنشاء بيانات منتجات غير موجودة "
+                "في الاستجابة."
             )
 
-        products = [normalize_product(product) for product in raw_products]
+        products = [
+            normalize_product(product)
+            for product in raw_products
+        ]
 
         output = {
-            "title": info.get("title") or "Items shared by your friend",
+            "title": info.get("title") or (
+                "Items shared by your friend"
+            ),
             "product_count": len(products),
             "products": products,
             "out_of_stock_count": len(info.get("outStock") or []),
-            "unavailable_count": len(info.get("unavailable") or []),
+            "unavailable_count": len(
+                info.get("unavailable") or []
+            ),
             "landing_url": url,
             "final_page_url": final_url,
             "api_url": result["api_url"],
