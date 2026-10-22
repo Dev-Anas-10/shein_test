@@ -13,6 +13,16 @@ def is_shein(url):
     h = (p.hostname or "").lower()
     return p.scheme in ("http", "https") and (h == "shein.com" or h.endswith(".shein.com"))
 
+URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
+
+def extract_url(text):
+    """يلقط أول رابط SHEIN من أي نص (حتى لو فيه كلام زيادة حواليه)."""
+    for m in URL_RE.finditer(text or ""):
+        u = m.group(0).rstrip(".,;:!?)'\"")
+        if is_shein(u):
+            return u
+    raise ValueError("ما لقيتش رابط SHEIN في النص")
+
 def landing_url(group_id, shc, country="SA"):
     q = urlencode({"shc": shc, "group_id": group_id, "local_country": country,
                    "url_from": "", "cart_share": 1})
@@ -107,7 +117,7 @@ def main():
     if len(sys.argv) != 2:
         sys.exit("Usage: scraper.py URL")
     try:
-        url = normalize_input(sys.argv[1].strip())
+        url = normalize_input(extract_url(sys.argv[1]))
         body = capture(url)
         if not isinstance(body, dict):
             sys.exit("ما اتلقطتش استجابة SHEIN (ممكن SHEIN طلبت تحقق إضافي أو الرابط منتهي)")

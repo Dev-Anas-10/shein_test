@@ -2,9 +2,9 @@
 {% block body %}
 <div class="card">
   <h2>طلب أوردر</h2>
-  <p>حط رابط سلة SHEIN المشتركة (الرابط المباشر أو الرابط القصير onelink).</p>
+  <p>الصق رسالة المشاركة زي ما نسختها من SHEIN (أو الرابط لوحده). هيلقط رابط SHEIN منها ويتجاهل باقي الكلام.</p>
   <form method="post" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='جاري الاستخراج... (ممكن ياخد نص دقيقة)'">
-    <input type="url" name="url" placeholder="https://onelink.shein.com/... أو https://m.shein.com/ar/cart/share/landing?..." required>
+    <textarea name="url" rows="6" required placeholder="I found some great items at SHEIN! ... https://onelink.shein.com/..." style="width:100%;padding:11px;border:1px solid #ccc;border-radius:8px;font-size:15px;margin:6px 0 12px;font-family:inherit"></textarea>
     <button type="submit">استخراج المنتجات</button>
   </form>
 </div>

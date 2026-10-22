@@ -132,7 +132,7 @@ def run_scraper(url):
 @login_required
 def order():
     if request.method == "POST":
-        url = request.form.get("url", "").strip()
+        url = request.form.get("url", "").strip()[:5000]
         try:
             data = run_scraper(url)
         except Exception as e:
